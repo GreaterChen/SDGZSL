@@ -15,8 +15,8 @@ import classifier
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='SUN',help='dataset: CUB, AWA2, APY, FLO, SUN')
-parser.add_argument('--dataroot', default='./SDGZSL_data', help='path to dataset')
+parser.add_argument('--dataset', default='ZDFY',help='dataset: CUB, AWA2, APY, FLO, SUN')
+parser.add_argument('--dataroot', default='/home/LAB/chenlb24/ZhengDaFuyi', help='path to dataset')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
 parser.add_argument('--image_embedding', default='res101', type=str)
 parser.add_argument('--class_embedding', default='att', type=str)
