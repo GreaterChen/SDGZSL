@@ -41,7 +41,7 @@ parser.add_argument('--ae_drop', type=float, default=0.2, help='dropout rate in 
 parser.add_argument('--classifier_lr', type=float, default=0.001, help='learning rate to train softmax classifier')
 parser.add_argument('--classifier_steps', type=int, default=50, help='training steps of the classifier')
 
-parser.add_argument('--batchsize', type=int, default=64, help='input batch size')
+parser.add_argument('--batchsize', type=int, default=16, help='input batch size')
 parser.add_argument('--nSample', type=int, default=1200, help='number features to generate per class')
 
 parser.add_argument('--disp_interval', type=int, default=200)

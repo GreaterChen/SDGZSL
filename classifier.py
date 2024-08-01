@@ -1,3 +1,4 @@
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -13,8 +14,8 @@ def weights_init(m):
         init.constant_(m.bias, 0.0)
 
 class CLASSIFIER:
-    # train_Y is interger
-    def __init__(self, opt, _train_X, _train_Y, data_loader, test_seen_feature,test_unseen_feature, _nclass, _cuda, _lr=0.001, _beta1=0.5, _nepoch=20,
+    # train_Y is integer
+    def __init__(self, opt, _train_X, _train_Y, data_loader, test_seen_feature, test_unseen_feature, _nclass, _cuda, _lr=0.001, _beta1=0.5, _nepoch=20,
                  _batch_size=100,  generalized=True, MCA=True):
         self.train_X =  _train_X
         self.train_Y = _train_Y
@@ -100,15 +101,16 @@ class CLASSIFIER:
                 loss.backward()
                 self.optimizer.step()
 
-            acc_seen = self.val_gzsl(self.test_seen_feature, self.test_seen_label)
-            acc_unseen = self.val_gzsl(self.test_unseen_feature, self.test_unseen_label+self.ntrain_class)
+            acc_seen, probs_seen, preds_seen = self.val_gzsl(self.test_seen_feature, self.test_seen_label)
+            acc_unseen, probs_unseen, preds_unseen = self.val_gzsl(self.test_unseen_feature, self.test_unseen_label+self.ntrain_class)
             H = 2*acc_seen*acc_unseen / (acc_seen+acc_unseen)
             print('acc_seen=%.4f, acc_unseen=%.4f, h=%.4f' % (acc_seen, acc_unseen, H))
             if H > best_H:
                 best_seen = acc_seen
                 best_unseen = acc_unseen
                 best_H = H
-        return best_seen * 100, best_unseen * 100, best_H *100
+                self.save_results(probs_seen, preds_seen, self.test_seen_label, probs_unseen, preds_unseen, self.test_unseen_label, best_seen, best_unseen, best_H, epoch)
+        return best_seen * 100, best_unseen * 100, best_H * 100
 
     def next_batch(self, batch_size):
         start = self.index_in_epoch
@@ -145,11 +147,11 @@ class CLASSIFIER:
             # from index start to index end-1
             return self.train_X[start:end], self.train_Y[start:end]
 
-
     def val_gzsl(self, test_X, test_label):
         start = 0
         ntest = test_X.size()[0]
         predicted_label = torch.LongTensor(test_label.size())
+        all_probs = []
         with torch.no_grad():
             for i in range(0, ntest, self.batch_size):
                 end = min(ntest, start+self.batch_size)
@@ -157,13 +159,17 @@ class CLASSIFIER:
                     output = self.model(test_X[start:end].to(self.opt.gpu))
                 else:
                     output = self.model(test_X[start:end])
+                probs = torch.softmax(output, dim=1).cpu().numpy()
                 _, predicted_label[start:end] = torch.max(output.data, 1)
+                all_probs.append(probs)
                 start = end
+
+        all_probs = np.vstack(all_probs)
         if self.MCA:
             acc = self.eval_MCA(predicted_label.numpy(), test_label.numpy())
         else:
             acc = (predicted_label.numpy() == test_label.numpy()).mean()
-        return acc
+        return acc, all_probs, predicted_label.numpy()
 
     def eval_MCA(self, preds, y):
         cls_label = np.unique(y)
@@ -172,41 +178,30 @@ class CLASSIFIER:
             acc.append((preds[y == i] == i).mean())
         return np.asarray(acc).mean()
 
-    def compute_per_class_acc_gzsl(self, test_label, predicted_label, target_classes):
-        acc_per_class = 0
-        for i in target_classes:
-            idx = (test_label == i)
-            acc_per_class += torch.sum(test_label[idx]==predicted_label[idx]).float() / torch.sum(idx)
-        acc_per_class /= target_classes.size(0)
-        return acc_per_class
+    def save_results(self, probs_seen, preds_seen, true_labels_seen, probs_unseen, preds_unseen, true_labels_unseen, best_seen, best_unseen, best_H, epoch):
+        # 将 CUDA Tensor 移动到 CPU 并转换为 NumPy 数组
+        true_labels_seen = true_labels_seen.cpu().numpy()
+        
+        if probs_unseen is not None:
+            seen_df = pd.DataFrame(probs_seen, columns=[f'class_{i}' for i in range(probs_seen.shape[1])])
+            seen_df['true_label'] = true_labels_seen
+            seen_df['predicted_label'] = preds_seen
 
-    # test_label is integer
-    def val(self, test_X, test_label, target_classes):
-        start = 0
-        ntest = test_X.size()[0]
-        predicted_label = torch.LongTensor(test_label.size())
-        with torch.no_grad():
-            for i in range(0, ntest, self.batch_size):
-                end = min(ntest, start+self.batch_size)
-                if self.cuda:
-                    output = self.model(test_X[start:end].to(self.opt.gpu))
-                else:
-                    output = self.model(test_X[start:end])
-                _, predicted_label[start:end] = torch.max(output.data, 1)
-                start = end
-        if self.MCA:
-            acc = self.eval_MCA(predicted_label.numpy(), test_label.numpy())
+            true_labels_unseen = true_labels_unseen.cpu().numpy()
+            
+            unseen_df = pd.DataFrame(probs_unseen, columns=[f'class_{i}' for i in range(probs_unseen.shape[1])])
+            unseen_df['true_label'] = true_labels_unseen
+            unseen_df['predicted_label'] = preds_unseen
+
+            all_df = pd.concat([seen_df, unseen_df])
+            filename = f'/home/LAB/chenlb24/compare_model/SDGZSL/out/ZDFY/results_h_{best_H:.4f}_acc_{best_seen:.4f}_unseen_acc_{best_unseen:.4f}_epoch_{epoch}.csv'
         else:
-            acc = (predicted_label.numpy() == test_label.numpy()).mean()
-        print(acc)
-        return acc
+            all_df = pd.DataFrame(probs_seen, columns=[f'class_{i}' for i in range(probs_seen.shape[1])])
+            all_df['true_label'] = true_labels_seen
+            all_df['predicted_label'] = preds_seen
+            filename = f'results_acc_{best_seen:.4f}_epoch_{epoch}.csv'
 
-    def compute_per_class_acc(self, test_label, predicted_label, nclass):
-        acc_per_class = torch.FloatTensor(nclass).fill_(0)
-        for i in range(nclass):
-            idx = (test_label == i)
-            acc_per_class[i] = torch.sum(test_label[idx]==predicted_label[idx]).float() / torch.sum(idx)
-        return acc_per_class.mean()
+        all_df.to_csv(filename, index=False)
 
 
 class LINEAR_LOGSOFTMAX(nn.Module):
